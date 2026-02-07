@@ -10,6 +10,14 @@ local function keymap_equals(a, b)
 	return termcodes(a) == termcodes(b)
 end
 
+---Returns if a key sequence starts with a given prefix.
+---@param a string
+---@param prefix string
+---@return boolean
+local function keymap_prefixed(a, prefix)
+	return vim.startswith(termcodes(a), prefix)
+end
+
 ---Returns the function constructed from the passed keymap object on call of
 ---which the original keymapping will be executed.
 ---@param map table keymap object
@@ -44,9 +52,54 @@ end
 
 ---Get map
 ---@param mode string
+---@param prefix string
+---@return table
+local function get_map_if_exists(mode, prefix)
+	local res = {}
+	prefix = termcodes(prefix)
+
+	for _, map in ipairs(api.nvim_buf_get_keymap(0, mode)) do
+		if keymap_prefix(map.lhs, prefix) then
+			res = {
+				lhs = map.lhs,
+				rhs = map.rhs or "",
+				expr = map.expr == 1,
+				callback = map.callback,
+				noremap = map.noremap == 1,
+				script = map.script == 1,
+				silent = map.silent == 1,
+				nowait = map.nowait == 1,
+				buffer = true,
+			}
+		end
+	end
+
+	if not res then
+		for _, map in ipairs(api.nvim_get_keymap(mode)) do
+			if keymap_equals(map.lhs, prefix) then
+				res = {
+					lhs = map.lhs,
+					rhs = map.rhs or "",
+					expr = map.expr == 1,
+					callback = map.callback,
+					noremap = map.noremap == 1,
+					script = map.script == 1,
+					silent = map.silent == 1,
+					nowait = map.nowait == 1,
+					buffer = false,
+				}
+			end
+		end
+	end
+
+	return res
+end
+
+---Get map
+---@param mode string
 ---@param lhs string
 ---@return table
-local function get_map_if_exists(mode, lhs)
+local function get_map_prefixed(mode, lhs)
 	local res
 
 	for _, map in ipairs(api.nvim_buf_get_keymap(0, mode)) do
@@ -163,6 +216,7 @@ end
 
 return setmetatable({
 	get = get_map,
+	get_prefixed = get_map_prefixed,
 	get_if = get_map_if_exists,
 	original = get_original,
 	amend = modes_amend,
