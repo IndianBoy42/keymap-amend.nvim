@@ -104,7 +104,7 @@ local function get_map_prefixed(mode, lhs)
 
 	for _, map in ipairs(api.nvim_buf_get_keymap(0, mode)) do
 		if keymap_equals(map.lhs, lhs) then
-			res = {
+			local fnd = {
 				lhs = map.lhs,
 				rhs = map.rhs or "",
 				expr = map.expr == 1,
@@ -114,14 +114,16 @@ local function get_map_prefixed(mode, lhs)
 				silent = map.silent == 1,
 				nowait = map.nowait == 1,
 				buffer = true,
+				original = get_original,
 			}
+			res[#res + 1] = fnd
 		end
 	end
 
 	if not res then
 		for _, map in ipairs(api.nvim_get_keymap(mode)) do
 			if keymap_equals(map.lhs, lhs) then
-				res = {
+				local fnd = {
 					lhs = map.lhs,
 					rhs = map.rhs or "",
 					expr = map.expr == 1,
@@ -131,7 +133,9 @@ local function get_map_prefixed(mode, lhs)
 					silent = map.silent == 1,
 					nowait = map.nowait == 1,
 					buffer = false,
+					original = get_original,
 				}
+				res[#res + 1] = fnd
 			end
 		end
 	end
@@ -169,8 +173,8 @@ local function amend_map(mode, map, rhs, opts)
 		"] ",
 		map.desc or "",
 	})
-	vim.keymap.set(mode, lhs, function()
-		rhs(original)
+	vim.keymap.set(mode, map.lhs, function()
+		rhs(original, map)
 	end, opts)
 end
 
@@ -188,6 +192,12 @@ end
 local function amend(mode, lhs, rhs, opts)
 	local map = get_map(mode, lhs)
 	return amend_map(mode, map, rhs, opts)
+end
+local function amend_prefixed(mode, lhs, rhs, opts)
+	local maps = get_map_prefixed(mode, lhs)
+	for i, map in ipairs(maps) do
+		amend_map(mode, map, rhs, opts)
+	end
 end
 
 ---Amend the existing keymap.
@@ -213,6 +223,15 @@ local function modes_amend(mode, lhs, rhs, opts)
 		amend(mode, lhs, rhs, opts)
 	end
 end
+local function modes_amend_prefixed(mode, lhs, rhs, opts)
+	if type(mode) == "table" then
+		for _, m in ipairs(mode) do
+			amend_prefixed(m, lhs, rhs, opts)
+		end
+	else
+		amend_prefixed(mode, lhs, rhs, opts)
+	end
+end
 
 return setmetatable({
 	get = get_map,
@@ -220,7 +239,8 @@ return setmetatable({
 	get_if = get_map_if_exists,
 	original = get_original,
 	amend = modes_amend,
-	amend_of = modes_amend_if_exists,
+	amend_if = modes_amend_if_exists,
+	amend_prefixed = modes_amend_prefixed,
 }, {
 	__call = function(t, ...)
 		modes_amend(...)
