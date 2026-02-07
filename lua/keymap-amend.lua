@@ -1,11 +1,6 @@
 local api = vim.api
 
----Shortcut for `nvim_replace_termcodes`.
----@param keys string
----@return string
-local function termcodes(keys)
-	return api.nvim_replace_termcodes(keys, true, true, true) --[[@as string]]
-end
+local termcodes = vim.keycode
 
 ---Returns if two key sequence are equal or not.
 ---@param a string
@@ -20,23 +15,30 @@ end
 ---@param map table keymap object
 ---@return function
 local function get_original(map)
-	return function()
-		local keys, fmode
-		if map.expr then
-			if map.callback then
+	local keys, fmode
+	fmode = map.noremap and "in" or "im"
+	if map.expr then
+		if map.callback then
+			return function()
 				keys = map.callback()
-			else
-				keys = api.nvim_eval(map.rhs)
+				keys = termcodes(keys)
+				api.nvim_feedkeys(keys, fmode, false)
 			end
-		elseif map.callback then
-			map.callback()
-			return
 		else
-			keys = map.rhs
+			return function()
+				keys = api.nvim_eval(map.rhs)
+				keys = termcodes(keys)
+				api.nvim_feedkeys(keys, fmode, false)
+			end
 		end
+	elseif map.callback then
+		return map.callback
+	else
+		keys = map.rhs
 		keys = termcodes(keys)
-		fmode = map.noremap and "in" or "im"
-		api.nvim_feedkeys(keys, fmode, false)
+		return function()
+			api.nvim_feedkeys(keys, fmode, false)
+		end
 	end
 end
 
@@ -44,7 +46,7 @@ end
 ---@param mode string
 ---@param lhs string
 ---@return table
-local function get_map(mode, lhs)
+local function get_map_if_exists(mode, lhs)
 	local res
 
 	for _, map in ipairs(api.nvim_buf_get_keymap(0, mode)) do
@@ -81,6 +83,11 @@ local function get_map(mode, lhs)
 		end
 	end
 
+	return res
+end
+local function get_map(mode, lhs)
+	local res = get_map_if_exists(mode, lhs)
+
 	if not res then
 		res = {
 			lhs = lhs,
@@ -100,12 +107,7 @@ local function get_map(mode, lhs)
 	return res
 end
 
----@param mode string
----@param lhs string
----@param rhs string | function
----@param opts? table
-local function amend(mode, lhs, rhs, opts)
-	local map = get_map(mode, lhs)
+local function amend_map(mode, map, rhs, opts)
 	local original = map:original()
 	opts = opts or {}
 	opts.desc = table.concat({
@@ -119,11 +121,36 @@ local function amend(mode, lhs, rhs, opts)
 	end, opts)
 end
 
+---@param mode string
+---@param lhs string
+---@param rhs string | function
+---@param opts? table
+local function amend_if_exists(mode, lhs, rhs, opts)
+	local map = get_map_if_exists(mode, lhs)
+	if map == nil then
+		return
+	end
+	return amend_map(mode, map, rhs, opts)
+end
+local function amend(mode, lhs, rhs, opts)
+	local map = get_map(mode, lhs)
+	return amend_map(mode, map, rhs, opts)
+end
+
 ---Amend the existing keymap.
 ---@param mode string | string[]
 ---@param lhs string
 ---@param rhs string | function
 ---@param opts? table
+local function modes_amend_if_exists(mode, lhs, rhs, opts)
+	if type(mode) == "table" then
+		for _, m in ipairs(mode) do
+			amend_if_exists(m, lhs, rhs, opts)
+		end
+	else
+		amend_if_exists(mode, lhs, rhs, opts)
+	end
+end
 local function modes_amend(mode, lhs, rhs, opts)
 	if type(mode) == "table" then
 		for _, m in ipairs(mode) do
@@ -136,7 +163,10 @@ end
 
 return setmetatable({
 	get = get_map,
+	get_if = get_map_if_exists,
+	original = get_original,
 	amend = modes_amend,
+	amend_of = modes_amend_if_exists,
 }, {
 	__call = function(t, ...)
 		modes_amend(...)
